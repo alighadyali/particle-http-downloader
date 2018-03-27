@@ -24,7 +24,7 @@ struct HttpDownloadHeader
 /**
  * HTTP Request struct.
  * hostname request host
- * path	 request path
+ * path  request path
  * port     request port
  */
 struct HttpDownloadRequest
@@ -44,6 +44,12 @@ struct HttpDownloadResponse
   int status;
 };
 
+
+typedef enum {
+    RESPONSE_STATE_HEADERS,
+    RESPONSE_STATE_BODY
+} read_response_state_t;
+
 class HttpDownload {
 public:
 
@@ -62,9 +68,10 @@ public:
     //int - the number of bytes received
     //void* - the object you passed in as callbackParam.
     //See the implementation of writeToFile for an example.
-    void download(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[], void(*callback)(int, byte*, int, void*), void* callbackParam);
+    void download(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[]);
 
-    //void download(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[], void(*callback)(byte*, int, void*), void* callbackParam);
+    bool process(read_response_state_t *state, int *responseStatus, byte *chunk, int *length);
+    void finish();
 
 private:
 
@@ -75,15 +82,15 @@ private:
     int mRetryAttempts;
     int mRetryTimeout;
 
-    void request(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[], void(*callback)(int, byte*, int, void*), void* callbackParam);
+    void request(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[]);
 
-    void out(TCPClient *client, const char* writeToClient);
-    void sendHeader(TCPClient *client, const char* aHeaderName, const char* aHeaderValue);
-    void sendHeader(TCPClient *client, const char* aHeaderName, const int aHeaderValue);
-    void sendHeader(TCPClient *client, const char* aHeaderName);
-    void sendHeaders(TCPClient *client, HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart);
-    int receiveResponse(TCPClient *client, HttpDownloadResponse &response,void(*callback)(int, byte*, int, void*), void* callbackParam);
-    void sendRequest(TCPClient *client, HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart);
+    void out(const char* writeToClient);
+    void sendHeader(const char* aHeaderName, const char* aHeaderValue);
+    void sendHeader(const char* aHeaderName, const int aHeaderValue);
+    void sendHeader(const char* aHeaderName);
+    void sendHeaders(HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart);
+    void receiveResponse(HttpDownloadResponse &response);
+    void sendRequest(HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart);
 
     static void writeToFile(byte* fromResponse, int size, void* fileObject);
 

@@ -10,6 +10,17 @@
 
 extern char* itoa(int a, char* buffer, unsigned char radix);
 
+
+typedef struct {
+  TCPClient client;
+//    byte availBuff[512];
+//  void(*completionCallback)(int, byte*, int);
+  int currentResponseStatus;
+  read_response_state_t responseState;
+} http_local_t;
+
+http_local_t _http_local;
+
 /**
 * Constructor.
 */
@@ -33,48 +44,48 @@ HttpDownload::HttpDownload(int logLevel, int bytesPerChunk, int retryAttempts, i
 * in the aResponse struct and set the headers and the options in the aRequest
 * struct.
 */
-void HttpDownload::request(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[], void(*callback)(int, byte*, int, void*), void* callbackParam)
+void HttpDownload::request(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[])
 {
 
   int byteRangeStart = 0;
-  int lastHttpStatus = 206;
-  int retryCount = 0;
+//  int lastHttpStatus = 206;
+//  int retryCount = 0;
 
-  TCPClient client;
+//  TCPClient client;
 
-  while (lastHttpStatus == 206 || lastHttpStatus == -2) { //-2 is a retry request
-    lastHttpStatus = -1; //assume failure
+//  while (lastHttpStatus == 206 || lastHttpStatus == -2) { //-2 is a retry request
+//    lastHttpStatus = -1; //assume failure
 
 
-    sendRequest(&client, aRequest, headers, byteRangeStart);
+    sendRequest(aRequest, headers, byteRangeStart);
 
-    lastHttpStatus = receiveResponse(&client, aResponse, callback, callbackParam);
-    Serial.println("Received response.");
-    Serial.flush();
-    if (lastHttpStatus == -1) {
-        Serial.println("Response was -1, retrying...");
-        Serial.flush();
-        retryCount++;
-        if (retryCount > mRetryAttempts) {
-          //Give up.
-          logLine(LOGGING_LEVEL_ERROR, "Giving up after max retries.");
-        } else {
-          //Delay, and ask for a retry
-          logLine(LOGGING_LEVEL_INFO, "Last connection failed.  Retrying.");
-          delay(mRetryTimeout);
-          lastHttpStatus = -2;
-        }
-    } else {
-        //Good response.  Clear the retry count
-        retryCount = 0;
-        byteRangeStart += mBytesPerChunk;
-        Serial.println("Good response, clearing retry count.");
-        Serial.flush();
-    }
-  }
+    receiveResponse(aResponse);
+//    Serial.println("Received response.");
+//    Serial.flush();
+//    if (lastHttpStatus == -1) {
+//        Serial.println("Response was -1, retrying...");
+//        Serial.flush();
+//        retryCount++;
+//        if (retryCount > mRetryAttempts) {
+//          //Give up.
+//          logLine(LOGGING_LEVEL_ERROR, "Giving up after max retries.");
+//        } else {
+//          //Delay, and ask for a retry
+//          logLine(LOGGING_LEVEL_INFO, "Last connection failed.  Retrying.");
+//          delay(mRetryTimeout);
+//          lastHttpStatus = -2;
+//        }
+//    } else {
+//        //Good response.  Clear the retry count
+//        retryCount = 0;
+//        byteRangeStart += mBytesPerChunk;
+//        Serial.println("Good response, clearing retry count.");
+//        Serial.flush();
+//    }
+//  }
 }
 
-void HttpDownload::sendRequest(TCPClient *client, HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart) {
+void HttpDownload::sendRequest(HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart) {
 
   // NOTE: The default port tertiary statement is unpredictable if the request structure is not initialised
   // http_request_t request = {0} or memset(&request, 0, sizeof(http_request_t)) should be used
@@ -86,7 +97,7 @@ void HttpDownload::sendRequest(TCPClient *client, HttpDownloadRequest &request, 
         logLine(LOGGING_LEVEL_DEBUG, request.hostname);
         logLine(LOGGING_LEVEL_DEBUG, request.port);
     //connected = client.connect(server, (request.port) ? request.port : 80 );
-    connected = client->connect(request.hostname, 80 );
+    connected = _http_local.client.connect(request.hostname, 80 );
     logLine(LOGGING_LEVEL_DEBUG, "Connection attempt started.");
   } else {
         log(LOGGING_LEVEL_DEBUG, "sendRequest(), connecting to ip: ");
@@ -97,7 +108,7 @@ void HttpDownload::sendRequest(TCPClient *client, HttpDownloadRequest &request, 
         log(LOGGING_LEVEL_DEBUG, request.ip[2]);
         log(LOGGING_LEVEL_DEBUG, ".");
         logLine(LOGGING_LEVEL_DEBUG, request.ip[3]);
-    connected = client->connect(request.ip, request.port);
+    connected = _http_local.client.connect(request.ip, request.port);
   }
 
 
@@ -108,28 +119,28 @@ void HttpDownload::sendRequest(TCPClient *client, HttpDownloadRequest &request, 
   }
 
   if (!connected) {
-    client->stop();
+    _http_local.client.stop();
     // If TCP Client can't connect to host, exit here.
     return;
   }
 
-  sendHeaders(client, request, headers, byteRangeStart);
+  sendHeaders(request, headers, byteRangeStart);
 
   logLine(LOGGING_LEVEL_DEBUG, "End of HTTP Request.");
 
 }
 
 
-void HttpDownload::sendHeaders(TCPClient *client, HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart) {
+void HttpDownload::sendHeaders(HttpDownloadRequest &request, HttpDownloadHeader headers[], int byteRangeStart) {
   //
   // Send HTTP Headers
   //
 
   // Send initial headers (only HTTP 1.0 is supported for now).
-  out(client, HTTP_DOWNLOAD_METHOD);
-  out(client, " ");
-  out(client, request.path);
-  out(client, " HTTP/1.1\r\n");
+  out(HTTP_DOWNLOAD_METHOD);
+  out(" ");
+  out(request.path);
+  out(" HTTP/1.1\r\n");
 
   logLine(LOGGING_LEVEL_DEBUG, "Start of HTTP Request.");
   logLine(LOGGING_LEVEL_DEBUG, "");
@@ -139,8 +150,8 @@ void HttpDownload::sendHeaders(TCPClient *client, HttpDownloadRequest &request, 
   logLine(LOGGING_LEVEL_DEBUG, " HTTP/1.1");
 
   // Send General and Request Headers.
-  sendHeader(client, "Connection", "close"); // Not supporting keep-alive for now.
-  sendHeader(client, "accept-encoding", "gzip, deflate");
+  sendHeader("Connection", "close"); // Not supporting keep-alive for now.
+  sendHeader("accept-encoding", "gzip, deflate");
   char rangeValue[64];
   char itoaBuffer[32];
   strcpy(rangeValue, "bytes=");
@@ -149,9 +160,9 @@ void HttpDownload::sendHeaders(TCPClient *client, HttpDownloadRequest &request, 
   strcat(rangeValue, "-");
   itoa(byteRangeStart + mBytesPerChunk - 1, itoaBuffer, 10);
   strcat(rangeValue, itoaBuffer);
-  //sendHeader(client, "Range", rangeValue);
+  //sendHeader("Range", rangeValue);
   if(request.hostname!=NULL) {
-    sendHeader(client, "Host", request.hostname);
+    sendHeader("Host", request.hostname);
   }
 
   //Send custom headers
@@ -159,181 +170,129 @@ void HttpDownload::sendHeaders(TCPClient *client, HttpDownloadRequest &request, 
     int i = 0;
     while (headers[i].header != NULL) {
       if (headers[i].value != NULL) {
-        sendHeader(client, headers[i].header, headers[i].value);
+        sendHeader(headers[i].header, headers[i].value);
       } else {
-        sendHeader(client, headers[i].header);
+        sendHeader(headers[i].header);
       }
       i++;
     }
   }
 
   // Empty line to finish headers
-  out(client, "\r\n");
-  client->flush();
+  out("\r\n");
+  _http_local.client.flush();
 
 
   logLine(LOGGING_LEVEL_DEBUG, "");
 }
 
-int HttpDownload::receiveResponse(TCPClient *client, HttpDownloadResponse &response,void(*callback)(int, byte*, int, void*), void* callbackParam) {
-  // If a proper response code isn't received it will be set to -1.
-  response.status = -1;
+bool HttpDownload::process(read_response_state_t *state, int *responseStatus, byte *chunk, int *length)
+{
+  *state = _http_local.responseState;
+  *responseStatus = _http_local.currentResponseStatus;
+  *length = 0;
 
-  //
-  // Receive HTTP Response
-  //
-  // The first value of client.available() might not represent the
-  // whole response, so after the first chunk of data is received instead
-  // of terminating the connection there is a delay and another attempt
-  // to read data.
-  // The loop exits when the connection is closed, or if there is a
-  // timeout or an error.
-
-  unsigned long lastTime = millis();
-
-  // Wait until the server either disconnects, gives us a response, or the timeout is exceeded
-  logLine(LOGGING_LEVEL_DEBUG, "Waiting for a response.");
-  while(client->connected() && !client->available() && millis() - lastTime < TIMEOUT_INITIAL_RESPONSE) {
-    // While we are waiting, which could be a while, allow cloud stuff to happen as needed
-    //Spark.process();
+  if (!_http_local.client.connected()){
+    return false;
   }
 
-  logLine(LOGGING_LEVEL_DEBUG, "Exited wait loop.");
-
-  if(client->connected() && client->available()) {
-    // We stopped waiting because we actually got something
-    int charCount = 0;
-    int lastReadTime = millis();
-
-    // Keep going until the server either disconnects, or stops feeding us data in a timely manner
-    logLine(LOGGING_LEVEL_DEBUG, "Reading response.");
-    bool headersEnded = false;
-    // char headerBuffer[1024];
-    // headerBuffer[0] = 0;
-    while(client->connected() && millis() - lastReadTime < TIMEOUT_RESPONSE_READ) {
-      // We got something!
-      int numAvail = client->available();
-      int packetSize = numAvail;
-      if (numAvail > 0) {
-        /*log(LOGGING_LEVEL_DEBUG, "Bytes available: ");
-        logLine(LOGGING_LEVEL_DEBUG, numAvail);*/
-        byte* availBuff = new byte[numAvail];
-        client->read(availBuff, numAvail);
+  if (!_http_local.client.available()){
+    return true;
+  }
 
 
-        /*logLine(LOGGING_LEVEL_DEBUG, "Read response bytes: ");
-        for (int ii=0; ii<numAvail; ii++){
-          Serial.print((char)availBuff[ii]);
-          Serial.flush();
-        }*/
-
-          /*Serial.println("");
-          Serial.flush();*/
-        //logLine(LOGGING_LEVEL_DEBUG, "Allocated response buffer.");
-
-        if (response.status == -1) {
-          char httpStatus[4];
-          httpStatus[0] = availBuff[9];
-          httpStatus[1] = availBuff[10];
-          httpStatus[2] = availBuff[11];
-          httpStatus[3] = 0;
-          response.status = atoi(httpStatus);
-
-
-          /*log(LOGGING_LEVEL_DEBUG, "Formed response status:");
-          logLine(LOGGING_LEVEL_DEBUG, response.status);*/
-
-          if (response.status == 416) {
-            //All done.
-            return response.status;
-          }
-          if (response.status == 404) {
-            // Not found!
-            logLine(LOGGING_LEVEL_ERROR, "Request resulted in HTTP 404.");
-
-            /*client->flush();
-            client->stop();
-
-            logLine(LOGGING_LEVEL_ERROR, "Returning 404.");
-
-            return response.status;*/
-          }
-        }
-
-        // Make note of when this happened
-        lastReadTime = millis();
-
-        byte* callbackData = availBuff;
-        //Eat the headers
-        if (!headersEnded) {
-          //logLine(LOGGING_LEVEL_DEBUG, "Processing headers");
-
-          char* headerEnd = strstr((const char*)availBuff, "\r\n\r\n");
-
-
-          // strncat(headerBuffer, (char*)availBuff, (byte*)headerEnd - availBuff);
-          if (headerEnd != NULL) {
-
-            logLine(LOGGING_LEVEL_DEBUG, "Found header end");
-            headerEnd += 4;// \r\n\r\n from above
-
-            callbackData = (byte*)headerEnd;
-            numAvail -= (byte*)headerEnd - availBuff;
-
-            headersEnded = true;
-
-          } else {
-            //Still haven't found headers.  Don't send anything to the callback.
-
-            logLine(LOGGING_LEVEL_DEBUG, "Header end not yet found.");
-            numAvail = 0;
-          }
-
-        }
-
-        charCount += packetSize;
-
-        //Send the data to our callback
-        if (numAvail != 0) {
-          if (callback != NULL) {
-            //logLine(LOGGING_LEVEL_DEBUG, "Calling callback.");
-            callback(response.status, callbackData, numAvail, callbackParam);
-          } else {
-
-              //logLine(LOGGING_LEVEL_DEBUG, "callback == NULL");
-          }
-        } else {
-
-            logLine(LOGGING_LEVEL_DEBUG, "numAvail == 0, end of response detected.");
-        }
-
-          //logLine(LOGGING_LEVEL_DEBUG, "Deleting availBuff");
-        delete availBuff;
-
-          //logLine(LOGGING_LEVEL_DEBUG, "Deleted availBuff");
-      }
-
-      //logLine(LOGGING_LEVEL_DEBUG, ",");
-      // While we are waiting, which could be a while, allow cloud stuff to happen as needed
-      //Spark.process();
-
+    int numAvail = _http_local.client.available();
+    if (numAvail > 512){
+      Serial.printlnf("Error, received chunk larger than static buffer: %i", numAvail);
+      return false;
     }
 
-    // Show a wait/read summary for debugging
-    log(LOGGING_LEVEL_DEBUG, "Bytes read: ");
-    logLine(LOGGING_LEVEL_DEBUG, charCount);
-  }
-  else {
-    //We timed out on the initial response
-    logLine(LOGGING_LEVEL_ERROR, "No/empty response");
-  }
 
-  // Just to be nice, let's make sure we finish clean
-  client->flush();
-  client->stop();
-  logLine(LOGGING_LEVEL_DEBUG, "Connection closed");
+    if (numAvail > 0) {
+      _http_local.client.read(chunk, numAvail);
 
-  return response.status;
+      if (_http_local.currentResponseStatus == -1) {
+        char httpStatus[4];
+        httpStatus[0] = chunk[9];
+        httpStatus[1] = chunk[10];
+        httpStatus[2] = chunk[11];
+        httpStatus[3] = 0;
+        _http_local.currentResponseStatus = atoi(httpStatus);
+
+        if (_http_local.currentResponseStatus == 404) {
+          logLine(LOGGING_LEVEL_ERROR, "Request resulted in HTTP 404.");
+        }
+      }
+
+      byte* callbackData = chunk;
+
+      if (_http_local.responseState == RESPONSE_STATE_HEADERS) {
+
+        char* headerEnd = strstr((const char*)chunk, "\r\n\r\n");
+
+        if (headerEnd != NULL) {
+
+          logLine(LOGGING_LEVEL_DEBUG, "Found header end");
+          headerEnd += 4;// \r\n\r\n from above
+
+          callbackData = (byte*)headerEnd;
+          numAvail -= (byte*)headerEnd - chunk;
+
+          _http_local.responseState = RESPONSE_STATE_BODY;
+
+        } else {
+          //Still haven't found headers.  Don't send anything to the callback.
+
+          logLine(LOGGING_LEVEL_DEBUG, "Header end not yet found.");
+          numAvail = 0;
+        }
+
+      }
+
+      if (_http_local.responseState == RESPONSE_STATE_HEADERS){
+        // still working on headers...
+        return true;
+      }
+
+      // Send the data to our callback
+      if (numAvail != 0) {
+
+//        Serial.printf("na: %i, ", numAvail);
+
+        *responseStatus = _http_local.currentResponseStatus;
+          memcpy(chunk, callbackData, numAvail);
+//        *chunk = callbackData;
+        *length = numAvail;
+        *state = _http_local.responseState;
+
+//        if (_http_local.completionCallback != NULL) {
+//          Serial.println("callback...");
+////          _http_local.completionCallback(_http_local.currentResponseStatus, callbackData, numAvail);
+//        }
+        return true;
+      } else {
+          logLine(LOGGING_LEVEL_DEBUG, "numAvail == 0, end of response detected.");
+          return true;
+      }
+
+    } else {
+      return true;
+    }
+
+
+}
+
+void HttpDownload::finish()
+{
+
+    _http_local.client.flush();
+    _http_local.client.stop();
+    logLine(LOGGING_LEVEL_DEBUG, "Connection closed");
+}
+
+void HttpDownload::receiveResponse(HttpDownloadResponse &response) {
+  _http_local.currentResponseStatus = -1;
+  _http_local.responseState = RESPONSE_STATE_HEADERS;
 }
 
 /*void HttpDownload::download(HttpDownloadRequest &aRequest, HttpDownloadResponse &response, char* filename) {
@@ -344,11 +303,10 @@ int HttpDownload::receiveResponse(TCPClient *client, HttpDownloadResponse &respo
     outFile.close();
 }*/
 
-void HttpDownload::download(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[], void(*callback)(int, byte*, int, void*), void* callbackParam) {
+void HttpDownload::download(HttpDownloadRequest &aRequest, HttpDownloadResponse &aResponse, HttpDownloadHeader headers[]) {
 
-    request(aRequest, aResponse, headers, callback, callbackParam);
-    Serial.print("Requested.");
-    Serial.flush();
+//  _http_local.completionCallback = callback;
+    request(aRequest, aResponse, headers);
 }
 
 /*void HttpDownload::writeToFile(byte* fromResponse, int size, void* fileObject) {
@@ -356,36 +314,36 @@ void HttpDownload::download(HttpDownloadRequest &aRequest, HttpDownloadResponse 
   outFile->write(fromResponse, size);
 }*/
 
-//client->print is extremely slow.  Use this instead.
-void HttpDownload::out(TCPClient *client, const char *s) {
-  client->write( (const uint8_t*)s, strlen(s) );
+//_http_local.client.print is extremely slow.  Use this instead.
+void HttpDownload::out(const char *s) {
+  _http_local.client.write( (const uint8_t*)s, strlen(s) );
 }
 
 /**
 * Method to send a header, should only be called from within the class.
 */
-void HttpDownload::sendHeader(TCPClient *client, const char* aHeaderName, const char* aHeaderValue)
+void HttpDownload::sendHeader(const char* aHeaderName, const char* aHeaderValue)
 {
-  out(client, aHeaderName);
-  out(client, ": ");
-  out(client, aHeaderValue);
-  out(client, "\r\n");
+  out(aHeaderName);
+  out(": ");
+  out(aHeaderValue);
+  out("\r\n");
 
   log(LOGGING_LEVEL_DEBUG, aHeaderName);
   log(LOGGING_LEVEL_DEBUG, ": ");
   logLine(LOGGING_LEVEL_DEBUG, aHeaderValue);
 }
 
-void HttpDownload::sendHeader(TCPClient *client, const char* aHeaderName, const int aHeaderValue)
+void HttpDownload::sendHeader(const char* aHeaderName, const int aHeaderValue)
 {
   char buffer[16];
   itoa(aHeaderValue, buffer, 10);
-  sendHeader(client, aHeaderName, buffer);
+  sendHeader(aHeaderName, buffer);
 }
 
-void HttpDownload::sendHeader(TCPClient *client, const char* aHeaderName)
+void HttpDownload::sendHeader(const char* aHeaderName)
 {
-  out(client, aHeaderName);
+  out(aHeaderName);
 
   logLine(LOGGING_LEVEL_DEBUG, aHeaderName);
 }
